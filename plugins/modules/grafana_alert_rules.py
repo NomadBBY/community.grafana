@@ -6,80 +6,133 @@
 
 from __future__ import absolute_import, division, print_function
 
-DOCUMENTATION = """
+DOCUMENTATION = r"""
 ---
 module: grafana_alert_rules
 author:
-  - Thierry Sallé (@seuf)
+  - Artis Cevers @Artis_Code
 version_added: "1.0.0"
-short_description: Manage Grafana Alert Rules
+short_description: Manage Grafana unified alert rules through the API
 description:
-  - Create, update, delete, export Grafana Alert Rules via API.
+  - Create, update, delete, or export Grafana unified alert rules using the provisioning API.
+  - This module supports Grafana versions 8 and higher, where the unified alerting system was introduced.
+  - It can also interact with subfolders starting from Grafana v11.
+  - Authentication can be provided using either a Grafana API key or basic authentication credentials.
+
 options:
+  grafana_url:
+    description:
+      - URL to the Grafana server.
+      - Example: http://grafana.example.com
+    required: true
+    type: str
+
+  grafana_api_key:
+    description:
+      - Grafana API key for bearer authentication.
+      - When provided, C(org_id) and C(org_name) are ignored because an API key belongs to one organization.
+    type: str
+
+  url_username:
+    description:
+      - Username for HTTP basic authentication.
+      - Mutually exclusive with C(grafana_api_key).
+    type: str
+
+  url_password:
+    description:
+      - Password for HTTP basic authentication.
+      - Required when C(url_username) is set.
+    type: str
+
   org_id:
     description:
-      - The Grafana organization ID where the alert rule will be imported / exported / deleted.
-      - Not used when I(grafana_api_key) is set, because the grafana_api_key only belongs to one organization.
+      - Grafana organization ID where the alert rule will be managed.
+      - Not used when C(grafana_api_key) is provided.
       - Mutually exclusive with C(org_name).
-    default: 1
     type: int
+    default: 1
+
   org_name:
     description:
-      - The Grafana organization name where the alert rule will be imported / exported / deleted.
-      - Not used when I(grafana_api_key) is set, because the grafana_api_key only belongs to one organization.
+      - Grafana organization name where the alert rule will be managed.
+      - Not used when C(grafana_api_key) is provided.
       - Mutually exclusive with C(org_id).
     type: str
+
   folder:
     description:
-      - UID of the folder where the alert rule will be created or imported.
-      - Required if C(parent_folder) is set.
+      - UID of the folder where the alert rule resides or will be created.
+      - Default folder is C(General).
+    type: str
     default: General
     version_added: "1.0.0"
-    type: str
+
   parent_folder:
     description:
-      - UID of the parent folder used to scope the search for the specified C(folder).
-      - Available with subfolder feature of Grafana 11.
-    version_added: "2.2.0"
+      - UID of the parent folder used to scope subfolder searches.
+      - Only available starting with Grafana v11 (subfolder feature).
     type: str
+    version_added: "2.2.0"
+
   state:
     description:
-      - State of the alert rule.
-    choices: [ absent, export, present ]
+      - Desired state of the alert rule.
+      - C(present) → create or update an alert rule.
+      - C(absent) → delete an existing alert rule.
+      - C(export) → export an existing alert rule to a file.
+    type: str
     default: present
-    type: str
+    choices: [present, absent, export]
+
   uid:
-    version_added: "1.0.0"
     description:
-      - Used to identify the alert rule when C(state) is C(export) or C(absent).
-      - When C(state) is C(present), this can be used to set the UID during alert rule creation.
+      - Unique identifier (UID) of the alert rule.
+      - Used for lookup or update when C(state) is C(export) or C(absent).
+      - Can also be explicitly provided during creation when C(state) is C(present).
     type: str
+    version_added: "1.0.0"
+
   path:
     description:
-      - The path to the json file containing the Grafana alert rule to import or export.
-      - A http URL is also accepted (since 2.10).
-      - Required if C(state) is C(export) or C(present).
-    aliases: [ alert_rule_url ]
+      - Local filesystem path or remote HTTP URL pointing to the alert rule JSON document.
+      - Required when C(state) is C(present) or C(export).
+      - Alias: C(alert_rule_url).
     type: str
+    aliases:
+      - alert_rule_url
+
   overwrite:
     description:
-      - Override existing alert rule when state is present.
+      - Whether to override an existing alert rule when C(state) is C(present).
+      - If false and the rule already exists, the operation will fail unless the rule differs.
     type: bool
     default: false
+
   title:
     description:
       - Title of the alert rule.
-      - Used when searching for alert rules.
+      - Used as a human-readable identifier in messages.
     type: str
+
 extends_documentation_fragment:
-- community.grafana.basic_auth
-- community.grafana.api_key
+  - community.grafana.basic_auth
+  - community.grafana.api_key
+
+requirements:
+  - Grafana >= 8.0.0
+  - Python >= 3.6
+  - Ansible >= 2.10
+notes:
+  - Unified alert rules and provisioning endpoints were introduced in Grafana 8.
+  - Subfolder operations require Grafana 11 or newer.
+  - The module supports Ansible check mode for dry-run operations.
 """
 
-EXAMPLES = """
-- name: Import Grafana alert rule from file
+EXAMPLES = r"""
+- name: Create or update a Grafana alert rule
   community.grafana.grafana_alert_rules:
-    url: http://grafana.company.com
+    grafana_url: http://grafana.company.com
     grafana_api_key: "{{ grafana_api_key }}"
     state: present
     overwrite: true
@@ -87,44 +140,59 @@ EXAMPLES = """
 
 - name: Import Grafana alert rule from URL
   community.grafana.grafana_alert_rules:
-    url: http://grafana.company.com
+    grafana_url: http://grafana.company.com
     grafana_api_key: "{{ grafana_api_key }}"
     folder: alerts
     alert_rule_url: https://example.com/alert_rules/cpu_alert.json
 
-- name: Import Grafana alert rule in a subfolder
+- name: Import Grafana alert rule into a subfolder
   community.grafana.grafana_alert_rules:
-    url: http://grafana.company.com
+    grafana_url: http://grafana.company.com
     grafana_api_key: "{{ grafana_api_key }}"
     parent_folder: alerts
     folder: system
-    path: /path/to/alert_rules/cpu_alert.json
+    path: /path/to/alert_rules/system_alert.json
 
-- name: Export alert rule
+- name: Export existing alert rule to a local JSON file
   community.grafana.grafana_alert_rules:
-    url: http://grafana.company.com
+    grafana_url: http://grafana.company.com
     url_username: "admin"
     url_password: "{{ grafana_password }}"
     org_id: 1
     state: export
     uid: "cpu_alert_001"
-    path: "/path/to/export/cpu_alert.json"
+    path: "/exports/cpu_alert.json"
 
-- name: Delete alert rule
+- name: Delete an existing alert rule
   community.grafana.grafana_alert_rules:
-    url: http://grafana.company.com
+    grafana_url: http://grafana.company.com
     grafana_api_key: "{{ grafana_api_key }}"
     state: absent
     uid: "cpu_alert_001"
 """
 
-RETURN = """
+RETURN = r"""
 ---
 uid:
-  description: uid of the created / deleted / exported alert rule.
-  returned: success
+  description:
+    - UID of the alert rule that was created, updated, deleted, or exported.
+  returned: always
   type: str
   sample: cpu_alert_001
+
+msg:
+  description:
+    - Human-readable message describing the operation result.
+  returned: always
+  type: str
+  sample: Alert rule cpu_alert_001 updated.
+
+changed:
+  description:
+    - Indicates whether the alert rule was changed (created, updated, deleted, or exported).
+  returned: always
+  type: bool
+  sample: true
 """
 
 import json
@@ -192,357 +260,313 @@ def parse_grafana_version(version_str):
         raise GrafanaAPIException("Unable to parse Grafana version '%s': %s" % (version_str, str(e)))
 
 
-def grafana_organization_id_by_name(module, url, org_name, headers):
+def grafana_organization_id_by_name(module, grafana_url, org_name, headers):
+
+    # --- Send GET request -------------------------------
     r, info = fetch_url(
-        module, "%s/api/user/orgs" % url, headers=headers, method="GET"
+        module,
+        "%s/api/user/orgs" % grafana_url,
+        headers=headers,
+        method="GET"
     )
-    if info["status"] != 200:
-        raise GrafanaAPIException("Unable to retrieve users organizations: %s" % info)
+
+    # --- Check response status -----------------------------------------------
+    status = info.get("status", 0)
+    if status != 200:
+        raise GrafanaAPIException(
+            "Unable to retrieve users organizations: %s" % info
+        )
+
+    # --- Parse response content ----------------------------------------------
     organizations = json.loads(to_text(r.read()))
     for org in organizations:
         if org["name"] == org_name:
             return org["orgId"]
 
+    # --- If not found, raise an explicit exception ----------------------------
     raise GrafanaAPIException(
         "Current user isn't member of organization: %s" % org_name
     )
 
 
-def grafana_switch_organization(module, url, org_id, headers):
+def grafana_switch_organization(module, grafana_url, org_id, headers):
+
+    # --- Send POST request -------------------------------
     r, info = fetch_url(
         module,
-        "%s/api/user/using/%s" % (url, org_id),
+        "%s/api/user/using/%s" % (grafana_url, org_id),
         headers=headers,
         method="POST",
-        )
-    if info["status"] != 200:
+    )
+
+    # --- Check response status -----------------------------------------------
+    status = info.get("status", 0)
+    if status != 200:
         raise GrafanaAPIException(
             "Unable to switch to organization %s : %s" % (org_id, info)
         )
 
 
 def grafana_headers(module, data):
+
     headers = {"content-type": "application/json; charset=utf8"}
-    if "grafana_api_key" in data and data["grafana_api_key"]:
-        headers["Authorization"] = "Bearer %s" % data["grafana_api_key"]
+
+    api_key = data.get("grafana_api_key")
+    grafana_url = data.get("url")
+
+    # --- Use API key authentication if available -----------------------------
+    if api_key:
+        headers["Authorization"] = "Bearer %s" % api_key
+
+    # --- Otherwise fall back to basic auth and org switch ---------------------
     else:
+        # Ask Ansible to use basic authentication
         module.params["force_basic_auth"] = True
-        if module.params["org_name"]:
-            org_name = module.params["org_name"]
-            data["org_id"] = grafana_organization_id_by_name(
-                module, data["url"], org_name, headers
+
+        # Optional organization handling
+        org_name = module.params["org_name"]
+        if org_name:
+            org_id = grafana_organization_id_by_name(
+                module,
+                grafana_url,
+                org_name,
+                headers
             )
-        grafana_switch_organization(module, data["url"], data["org_id"], headers)
+
+            data["org_id"] = org_id
+
+            grafana_switch_organization(module, grafana_url, org_id, headers)
 
     return headers
 
 
-def get_grafana_version(module, url, headers):
+def get_grafana_version(module, grafana_url, headers):
+
+    # --- Perform GET request --------------------------------------------------
     r, info = fetch_url(
-        module, "%s/api/frontend/settings" % url, headers=headers, method="GET"
+        module,
+        "%s/api/frontend/settings" % grafana_url,
+        headers=headers,
+        method="GET"
     )
-    if info["status"] == 200:
+    status = info.get("status", 0)
+    if status == 200:
+
+    # --- Extract and parse version -------------------------------------------
         try:
             settings = json.loads(to_text(r.read()))
             grafana_version = parse_grafana_version(settings["buildInfo"]["version"])
         except UnicodeError:
-            raise GrafanaAPIException("Unable to decode version string to Unicode")
+            raise GrafanaAPIException(
+                "Unable to decode version string to Unicode"
+            )
         except Exception as e:
             raise GrafanaAPIException(e)
     else:
-        raise GrafanaAPIException("Unable to get grafana version: %s" % info)
+        raise GrafanaAPIException(
+            "Unable to get grafana version: %s" % info
+        )
 
+    # --- Return major version -------------------------------------------------
     return grafana_version.get("major")
 
 
-def grafana_folder_exists(module, url, folder_name, parent_folder, headers):
-    # the 'General' folder is a special case, it's UID is 'general'
-    if folder_name == "General":
-        return True, 0
+def grafana_alert_rule_exists(module, grafana_url, uid, headers):
 
-    try:
-        folder_url = "%s/api/folders" % url
-        if parent_folder:
-            folder_url = "%s?parentUid=%s" % (folder_url, parent_folder)
-
-        r, info = fetch_url(module, folder_url, headers=headers, method="GET")
-
-        if info["status"] != 200:
-            raise GrafanaAPIException(
-                "Unable to query Grafana API for folders (name: %s): %d"
-                % (folder_name, info["status"])
-            )
-
-        folders = json.loads(r.read())
-
-        for folder in folders:
-            if folder_name in (folder["title"], folder["uid"]):
-                return True, folder["uid"]
-    except Exception as e:
-        raise GrafanaAPIException(e)
-
-    return False, 0
-
-
-def grafana_alert_rule_exists(module, url, uid, headers):
-    alert_rule_exists = False
     alert_rule = {}
 
-    # Grafana unified alerting (v8+) uses /api/v1/provisioning/alert-rules/{uid}
-    grafana_version = get_grafana_version(module, url, headers)
-    if grafana_version >= 8:
-        uri = "%s/api/v1/provisioning/alert-rules/%s" % (url, uid)
-    else:
+    # --- Determine Grafana major version -------------------------------------
+    grafana_version = get_grafana_version(module, grafana_url, headers)
+    if grafana_version < 8:
         raise GrafanaAPIException(
-            "Alert rules require Grafana 8 or higher (unified alerting). Current version: %d" % grafana_version
+            f"Alert rules require Grafana 8 or higher (unified alerting). "
+            f"Current version: %d" % grafana_version
         )
 
-    r, info = fetch_url(module, uri, headers=headers, method="GET")
+    # --- Build endpoint URI ---------------------------------------------------
+    uri = "%s/api/v1/provisioning/alert-rules/%s" % (grafana_url, uid)
 
-    if info["status"] == 200:
-        alert_rule_exists = True
+    # --- Perform GET request --------------------------------------------------
+    r, info = fetch_url(module, uri, headers=headers, method="GET")
+    status = info.get("status", 0)
+
+    if status == 200:
         try:
             alert_rule = json.loads(r.read())
+            alert_rule_exists = True
         except Exception as e:
-            raise GrafanaAPIException(e)
+            raise GrafanaAPIException("Failed to decode alert rule response: %s" % to_native(e))
+
+    # --- HTTP 404: rule not found --------------------------------------------
     elif info["status"] == 404:
         alert_rule_exists = False
+
+    # --- Any other error ------------------------------------------------------
     else:
         raise GrafanaAPIException("Unable to get alert rule %s : %s" % (uid, info))
 
     return alert_rule_exists, alert_rule
 
 
-def grafana_alert_rule_search(module, url, folder_uid, title, headers):
-    # search alert rules by title
-    uri = "%s/api/v1/provisioning/alert-rules" % (
-        url
-    )
-    r, info = fetch_url(module, uri, headers=headers, method="GET")
+def grafana_alert_rule_search(module, grafana_url, uid, headers):
 
-    if info["status"] == 200:
+    # --- Build endpoint for unified alert rules -------------------------------
+    uri = "%s/api/v1/provisioning/alert-rules"% grafana_url
+
+    r, info = fetch_url(
+        module,
+        uri,
+        headers=headers,
+        method="GET"
+    )
+    status = info.get("status", 0)
+
+    # --- Success: parse and search -------------------------------------------
+    if status == 200:
         try:
             alert_rules = json.loads(r.read())
-            for r in alert_rules:
-                if r["title"] == title and r["folderUID"] == folder_uid:
-                    return grafana_alert_rule_exists(
-                        module, url, r["uid"], headers
-                    )
+            for rule in alert_rules:
+                if rule.get("uid") == uid:
+                    return grafana_alert_rule_exists(module, grafana_url, uid, headers)
         except Exception as e:
-            raise GrafanaAPIException(e)
+            raise GrafanaAPIException("Failed to decode alert rules list: %s" % to_native(e))
     else:
-        raise GrafanaAPIException("Unable to search alert rule %s : %s" % (title, info))
+        raise GrafanaAPIException("Unable to search alert rule %s : %s" % (uid, info))
 
     return False, None
 
 
-# for comparison, we sometimes need to ignore a few keys
 def is_grafana_alert_rule_changed(payload, alert_rule):
-    # Compare the payload with the existing alert rule
-    # Ignore certain fields that are auto-generated or managed by Grafana
 
-    # Create copies to avoid modifying the originals
-    payload_copy = copy.deepcopy(payload)
-    alert_rule_copy = copy.deepcopy(alert_rule)
+    # --- Defensive copies to avoid modifying inputs --------------------------
+    payload_copy = copy.deepcopy(payload or {})
+    alert_rule_copy = copy.deepcopy(alert_rule or {})
 
-    # Remove auto-generated/managed fields for comparison
-    fields_to_ignore = ["id", "updated", "provenance"]
+    # --- Fields managed or auto-generated by Grafana or by module parameters --
+    # These fields should not trigger a "changed" status
+    fields_to_ignore = {
+        "id",           # Auto-generated by Grafana
+        "updated",      # Timestamp - always changes
+        "provenance",   # Managed by Grafana
+        "orgID",        # Org ID - can vary in format
+        "orgId",        # Org ID - alternate format
+    }
 
     for field in fields_to_ignore:
         payload_copy.pop(field, None)
         alert_rule_copy.pop(field, None)
 
-    if payload_copy == alert_rule_copy:
-        return False
-    return True
 
+def resolve_folder_name_to_uid(module, grafana_url, folder_name, headers):
 
-def grafana_import_alert_rule_groups(module, data, payload, headers):
-    # Check that the groups JSON is nested under the 'groups' key
-    if "groups" not in payload:
-        raise GrafanaAPIException("Invalid alert rule groups format: missing 'groups' key")
+    # Allow direct UID usage without API lookup
+    if folder_name and ' ' not in folder_name and folder_name.islower():
+        return folder_name
 
-    # Get the folder UID using the helper function
-    folder_exists, folder_uid = grafana_folder_exists(
-        module, data["url"], data["folder"], data.get("parent_folder"), headers
+    # Fetch all folders from Grafana
+    uri = "%s/api/folders" % grafana_url
+
+    r, info = fetch_url(
+        module,
+        uri,
+        headers=headers,
+        method="GET"
     )
-    if not folder_exists:
-        raise GrafanaAPIException(
-            "Alert rule folder '%s' does not exist." % data["folder"]
-        )
+    status = info.get("status", 0)
 
-    # Process each group and its rules
-    for group in payload["groups"]:
-        if "rules" not in group:
-            continue
+    if status == 200:
+        try:
+            folders = json.loads(r.read())
 
-        for rule in group["rules"]:
-            try:
-                # Create individual alert rule payload
-                alert_rule_payload = {
-                    "uid": rule.get("uid"),
-                    "title": rule.get("title"),
-                    "condition": rule.get("condition"),
-                    "data": rule.get("data", []),
-                    "noDataState": rule.get("noDataState", "NoData"),
-                    "execErrState": rule.get("execErrState", "Alerting"),
-                    "for": rule.get("for", "5m"),
-                    "annotations": rule.get("annotations", {}),
-                    "labels": rule.get("labels", {}),
-                    "folderUID": folder_uid,
-                }
+            # Search for folder by title (name)
+            for folder in folders:
+                if folder.get("title") == folder_name:
+                    return folder.get("uid")
 
-                # Remove None values
-                alert_rule_payload = {k: v for k, v in alert_rule_payload.items() if v is not None}
+            # If not found by name, return original value (might be a UID)
+            return folder_name
 
-                uid = alert_rule_payload.get("uid")
-                title = alert_rule_payload.get("title")
-
-                if not uid and not title:
-                    raise GrafanaAPIException("Alert rule missing both uid and title - at least one is required")
-
-                # Check if alert rule already exists
-                alert_rule_exists = False
-                existing_rule = None
-
-                if uid:
-                    alert_rule_exists, existing_rule = grafana_alert_rule_exists(
-                        module, data["url"], uid, headers=headers
-                    )
-                elif title:
-                    alert_rule_exists, existing_rule = grafana_alert_rule_search(
-                        module, data["url"], folder_uid, title, headers=headers
-                    )
-
-                if alert_rule_exists:
-                    # Check if update is needed
-                    if is_grafana_alert_rule_changed(alert_rule_payload, existing_rule):
-                        if data.get("overwrite"):
-                            # Update existing rule
-                            r, info = fetch_url(
-                                module,
-                                "%s/api/v1/provisioning/alert-rules/%s" % (data["url"], uid),
-                                data=json.dumps(alert_rule_payload),
-                                headers=headers,
-                                method="PUT",
-                            )
-                            if info["status"] != 200:
-                                body = info.get("body", "")
-                                raise GrafanaAPIException("Failed to update rule '%s': HTTP %s - %s" % (title or uid, info["status"], body))
-                        else:
-                            # Rule exists but overwrite is False, skip
-                            continue
-                    # else: rule unchanged, continue to next
-                else:
-                    # Create new rule
-                    r, info = fetch_url(
-                        module,
-                        "%s/api/v1/provisioning/alert-rules" % data["url"],
-                        data=json.dumps(alert_rule_payload),
-                        headers=headers,
-                        method="POST",
-                    )
-                    if info["status"] != 201:
-                        body = info.get("body", "")
-                        raise GrafanaAPIException("Failed to create rule '%s': HTTP %s - %s" % (title or uid, info["status"], body))
-
-            except Exception as e:
-                raise GrafanaAPIException("Error processing rule '%s': %s" % (rule.get("title", "unknown"), str(e)))
-
-    # Return simple result
-    result = {
-        "msg": "Alert rule groups processed successfully",
-        "changed": True,
-    }
-
-    return result
+        except Exception as e:
+            # On parsing error, return original value
+            module.warn("Unable to parse folders list, using folder value as-is: %s" % to_native(e))
+            return folder_name
+    else:
+        # On API error, return original value
+        module.warn("Unable to fetch folders (HTTP %s), using folder value as-is" % status)
+        return folder_name
 
 
 def grafana_create_alert_rule(module, data):
-    # define data payload for grafana API
-    payload = {}
+
+    # --- Load payload --------------------------------------------------------
     try:
         with open(data["path"], "r", encoding="utf-8") as json_file:
             payload = json.load(json_file)
     except Exception as e:
         raise GrafanaAPIException("Can't load json file %s" % to_native(e))
 
-    # define http header
+    # --- Prepare headers and check Grafana version ---------------------------
     headers = grafana_headers(module, data)
-
     grafana_version = get_grafana_version(module, data["url"], headers)
 
-    # Alert rules require Grafana 8+ (unified alerting)
     if grafana_version < 8:
         raise GrafanaAPIException(
-            "Alert rules require Grafana 8 or higher (unified alerting). Current version: %d" % grafana_version
+            f"Alert rules require Grafana 8 or higher (unified alerting). "
+            f"Current version: {grafana_version}"
         )
 
-    # Check if this is an alert rule groups format (provisioning format)
-    if "apiVersion" in payload and "groups" in payload:
-        # Delegate to the groups import function to handle all rules
-        return grafana_import_alert_rule_groups(module, data, payload, headers)
-
-    # Extract UID and title from data or payload (for individual alert rules)
+    # --- Extract UID ---------------------------------------------------------
     uid = data.get("uid") or payload.get("uid")
-    title = data.get("title") or payload.get("title")
 
-    # Set UID in payload if provided in data
-    if data.get("uid"):
-        payload["uid"] = data["uid"]
-
-    result = {}
-
-    # test if the folder exists
-    if data.get("parent_folder") and grafana_version < 11:
-        module.fail_json(
-            failed=True, msg="Subfolder API is available starting Grafana v11"
-        )
-
-    # Verify folder exists and get folder UID
-    folder_exists, folder_uid = grafana_folder_exists(
-        module, data["url"], data["folder"], data.get("parent_folder"), headers
-    )
-    if folder_exists is False:
-        raise GrafanaAPIException(
-            "Alert rule folder '%s' does not exist." % data["folder"]
-        )
-
-    payload["folderUID"] = folder_uid
-
-    # test if alert rule already exists
+    # --- Check if alert rule exists (only if UID given) ----------------------
     if uid:
         alert_rule_exists, alert_rule = grafana_alert_rule_exists(
-            module, data["url"], uid, headers=headers
-        )
-    elif title:
-        alert_rule_exists, alert_rule = grafana_alert_rule_search(
             module,
             data["url"],
-            folder_uid,
-            title,
+            uid,
             headers=headers,
         )
     else:
-        raise GrafanaAPIException("Either uid or title must be provided for individual alert rules")
+        alert_rule_exists = False
+        alert_rule = {}
 
-    if alert_rule_exists is True:
+    # --- Ensure the UID in payload (if explicitly provided) ------------------
+    if data.get("uid"):
+        payload["uid"] = data["uid"]
+
+    # --- Add folder UID to payload if specified ------------------------------
+    if data.get("folder"):
+        folder_uid = resolve_folder_name_to_uid(module, data["url"], data["folder"], headers)
+        payload["folderUID"] = folder_uid
+
+    # --- Validate folder support ---------------------------------------------
+    if data.get("parent_folder") and grafana_version < 11:
+        module.fail_json(msg="Subfolder API is available starting Grafana v11")
+
+    # --- Initialize result structure ----------------------------------------
+    result = {}
+
+    # --- Update existing alert rule -----------------------------------------
+    if alert_rule_exists:
         grafana_alert_rule_changed = is_grafana_alert_rule_changed(payload, alert_rule)
 
         if grafana_alert_rule_changed:
+            # Support check mode
             if module.check_mode:
                 module.exit_json(
                     uid=uid,
                     failed=False,
                     changed=True,
-                    msg="Alert rule %s will be updated" % payload.get("title", uid),
+                    msg=f"Alert rule {payload.get('title', uid)} will be updated"
                 )
-            # update
+
+            # Require overwrite flag
             if not data.get("overwrite"):
                 raise GrafanaAPIException(
                     "Alert rule %s already exists. Use overwrite=true to update." % uid
                 )
 
+            # Perform PUT update
             r, info = fetch_url(
                 module,
                 "%s/api/v1/provisioning/alert-rules/%s" % (data["url"], uid),
@@ -550,32 +574,41 @@ def grafana_create_alert_rule(module, data):
                 headers=headers,
                 method="PUT",
             )
-            if info["status"] == 200:
+
+            if info.get("status") == 200:
                 try:
-                    alert_rule = json.loads(r.read())
-                    uid = alert_rule["uid"]
+                    alert_rule = json.loads(r.read()) if r else {}
+                    uid = alert_rule.get("uid", uid)
                 except Exception as e:
-                    raise GrafanaAPIException(e)
-                result["uid"] = uid
-                result["msg"] = "Alert rule %s updated" % payload.get("title", uid)
-                result["changed"] = True
+                    raise GrafanaAPIException(f"Failed to parse alert rule response: {e}")
+
+                result.update({
+                    "uid": uid,
+                    "msg": f"Alert rule {payload.get('title', uid)} updated.",
+                    "changed": True
+                })
+
             else:
-                body = json.loads(info["body"]) if info.get("body") else {}
+                body = json.loads(info.get("body", "{}")) if info.get("body") else {}
                 raise GrafanaAPIException(
-                    "Unable to update the alert rule %s : %s (HTTP: %d)"
-                    % (uid, body.get("message", info), info["status"])
+                    f"Unable to update alert rule {uid}: "
+                    f"{body.get('message', info)} (HTTP {info.get('status')})"
                 )
+
         else:
-            # unchanged
-            result["uid"] = uid
-            result["msg"] = "Alert rule %s unchanged." % payload.get("title", uid)
-            result["changed"] = False
+            # Nothing changed
+            result.update({
+                "uid": uid,
+                "msg": f"Alert rule {payload.get('title', uid)} unchanged.",
+                "changed": False,
+            })
+    # --- Create new alert rule ----------------------------------------------
     else:
         if module.check_mode:
             module.exit_json(
                 failed=False,
                 changed=True,
-                msg="Alert rule %s will be created" % payload.get("title", ""),
+                msg=f"Alert rule {payload.get('title', '')} will be created",
             )
 
         r, info = fetch_url(
@@ -585,49 +618,58 @@ def grafana_create_alert_rule(module, data):
             headers=headers,
             method="POST",
         )
-        if info["status"] == 201:
-            result["msg"] = "Alert rule %s created" % payload.get("title", "")
-            result["changed"] = True
+
+        if info.get("status") == 201:
             try:
-                alert_rule = json.loads(r.read())
-                uid = alert_rule["uid"]
+                alert_rule = json.loads(r.read()) if r else {}
+                uid = alert_rule.get("uid")
             except Exception as e:
-                raise GrafanaAPIException(e)
-            result["uid"] = uid
+                raise GrafanaAPIException(f"Failed to parse created alert rule response: {e}")
+
+            result.update({
+                "uid": uid,
+                "msg": f"Alert rule {payload.get('title', '')} created.",
+                "changed": True,
+            })
         else:
-            body = json.loads(info["body"]) if info.get("body") else {}
+            body = json.loads(info.get("body", "{}")) if info.get("body") else {}
             raise GrafanaAPIException(
-                "Unable to create the new alert rule %s : %s (HTTP: %d)"
-                % (payload.get("title", ""), body.get("message", info), info["status"])
+                f"Unable to create the new alert rule {payload.get('title', '')}: "
+                f"{body.get('message', info)} (HTTP {info.get('status')})"
             )
 
     return result
 
 
 def grafana_delete_alert_rule(module, data):
-    # define http headers
-    headers = grafana_headers(module, data)
 
+    # --- Prepare headers and Grafana version ---------------------------------
+    headers = grafana_headers(module, data)
     grafana_version = get_grafana_version(module, data["url"], headers)
 
-    # Alert rules require Grafana 8+ (unified alerting)
+    # Grafana's unified alerting starts from v8 — enforce requirement
     if grafana_version < 8:
         raise GrafanaAPIException(
-            "Alert rules require Grafana 8 or higher (unified alerting). Current version: %d" % grafana_version
+            "Alert rules require Grafana 8 or higher (unified alerting). "
+            "Current version: %d" % grafana_version
         )
-    else:
-        if data.get("uid"):
-            uid = data["uid"]
-        else:
-            raise GrafanaDeleteException("No uid specified %s")
 
-    # test if alert rule already exists
+    # --- Validate UID presence -----------------------------------------------
+    uid = data.get("uid")
+    if not uid:
+        raise GrafanaDeleteException("No UID specified for alert rule deletion.")
+
+    # --- Check if alert rule exists first ------------------------------------
     alert_rule_exists, alert_rule = grafana_alert_rule_exists(
         module, data["url"], uid, headers=headers
     )
 
+    # --- Initialize result structure -----------------------------------------
     result = {}
-    if alert_rule_exists is True:
+
+    # --- Rule exists → proceed to delete -------------------------------------
+    if alert_rule_exists:
+        # Support check mode (dry-run)
         if module.check_mode:
             module.exit_json(
                 uid=uid,
@@ -636,52 +678,75 @@ def grafana_delete_alert_rule(module, data):
                 msg="Alert rule %s will be deleted" % uid,
             )
 
-        # delete
+        # Perform DELETE request.
+        # For unified alerting (Grafana 8+), use /api/v1/provisioning/alert-rules/[uid]
         r, info = fetch_url(
             module,
             "%s/api/v1/provisioning/alert-rules/%s" % (data["url"], uid),
             headers=headers,
             method="DELETE",
         )
-        if info["status"] == 204:
-            result["msg"] = "Alert rule %s deleted" % uid
-            result["changed"] = True
-            result["uid"] = uid
+
+        status = info.get("status", 0)
+
+        if status in [200, 204]:
+            # 200 OK or 204 No Content = successful deletion
+            result.update({
+                "uid": uid,
+                "msg": "Alert rule %s deleted" % uid,
+                "changed": True,
+            })
+        elif status == 404:
+        # The rule might have already been removed externally
+            result.update({
+                "uid": uid,
+                "msg": "Alert rule %s not found (already deleted?)" % uid,
+                "changed": True,
+            })
         else:
+            # Unexpected response → raise a detailed exception
+            body = json.loads(info.get("body, {}")) if info.get("body") else {}
+            message = body.get("message", str(info))
             raise GrafanaAPIException(
-                "Unable to delete the alert rule %s : %s" % (uid, info)
+                "Unable to delete alert rule %s : %s (HTTP %s)" % (uid, message, status)
             )
+    # --- Rule does not exist --------------------------------------------------
     else:
-        # alert rule does not exist, do nothing
-        result = {
-            "msg": "Alert rule %s does not exist." % uid,
-            "changed": False,
+        result.update({
             "uid": uid,
-        }
+            "msg": "Alert rule %s does not exist" % (uid),
+            "changed": False,
+        })
 
     return result
 
 
 def grafana_export_alert_rule(module, data):
-    # define http headers
-    headers = grafana_headers(module, data)
 
+    # --- Prepare HTTP headers and Grafana version ----------------------------
+    headers = grafana_headers(module, data)
     grafana_version = get_grafana_version(module, data["url"], headers)
+
     if grafana_version < 8:
         raise GrafanaAPIException(
-            "Alert rules require Grafana 8 or higher (unified alerting). Current version: %d" % grafana_version
+            "Alert rules require Grafana 8 or higher (unified alerting). "
+            "Current version: %d" % grafana_version
         )
-    if data.get("uid"):
-        uid = data["uid"]
-    else:
-        raise GrafanaExportException("No uid specified")
 
-    # test if alert rule already exists
+    # --- Validate UID presence -----------------------------------------------
+    uid = data.get("uid")
+    if not uid:
+        raise GrafanaDeleteException("No UID specified for alert rule deletion.")
+
+    # --- Check if alert rule exists ------------------------------------------
     alert_rule_exists, alert_rule = grafana_alert_rule_exists(
         module, data["url"], uid, headers=headers
     )
 
-    if alert_rule_exists is True:
+    # --- Initialize result dictionary ----------------------------------------
+    result = {}
+
+    if alert_rule_exists:
         if module.check_mode:
             module.exit_json(
                 uid=uid,
@@ -689,22 +754,31 @@ def grafana_export_alert_rule(module, data):
                 changed=True,
                 msg="Alert rule %s will be exported to %s" % (uid, data["path"]),
             )
+
+        export_path = data.get("path")
+        if not export_path:
+            raise GrafanaExportException("No export path provided for alert rule export.")
+
         try:
+            # Write alert rule to file, formatted for readability
             with open(data["path"], "w", encoding="utf-8") as f:
                 f.write(json.dumps(alert_rule, indent=2))
         except Exception as e:
             raise GrafanaExportException("Can't write json file : %s" % to_native(e))
-        result = {
+
+        result.update({
+            "uid": uid,
             "msg": "Alert rule %s exported to %s" % (uid, data["path"]),
-            "uid": uid,
             "changed": True,
-        }
+        })
+
+    # --- If the rule does not exist ------------------------------------------
     else:
-        result = {
-            "msg": "Alert rule %s does not exist." % uid,
+        result.update({
             "uid": uid,
+            "msg": "Alert rule %s does not exist." % uid,
             "changed": False,
-        }
+        })
 
     return result
 
